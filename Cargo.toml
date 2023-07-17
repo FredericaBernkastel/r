@@ -10,13 +10,15 @@ authors = ["Frederica Bernkastel <frederica.bernkastel0@gmail.com>"]
 tokio = {version = "1", features = ["full"] }
 tokio-retry = "0.3"
 futures = "0.3"
-roux = "2.2"
-roux-stream = "0.2"
+reqwest = { version = "0.11", features = ["json", "gzip"] }
 clap = { version = "4.3", features = ["derive"] }
 anyhow = "1"
 chrono = "0.4"
 regex = "1.9"
 lettre = "0.10"
 toml = "0.7"
-serde = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 maud = "0.25"
+env_logger = "0.10"
+log = "0.4"

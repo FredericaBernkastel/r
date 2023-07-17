@@ -1,25 +1,35 @@
 use {
   anyhow::Result,
   futures::{StreamExt},
-  subreddit_watcher::SubredditWatcher,
+  reddit_watcher::RedditWatcher,
   clap::Parser,
   maud::html
 };
 
 mod cli;
-mod subreddit_watcher;
+mod reddit_watcher;
 mod email;
+mod util;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+  // Configure log level with RUST_LOG environment variable
+  // https://docs.rs/env_logger/0.10.0/env_logger/#enabling-logging
+  env_logger::Builder::from_env(
+    env_logger::Env::default()
+      .default_filter_or("debug")
+  ) .format_timestamp(None)
+    .format_module_path(false)
+    .format_target(false)
+    .init();
+
   let settings = cli::Settings::parse();
   let settings = &settings;
 
   let filter_regex = match settings.submission_filter_regex.as_ref() {
-    Some(regex_str) => Some(regex::Regex::new(&regex_str)?),
+    Some(regex_str) => Some(regex::Regex::new(regex_str)?),
     None => None
   };
-  let filter_regex = filter_regex.as_ref();
 
   let mailer = match settings.notify_email {
     Some(_) => Some(email::Mailer::new()?),
@@ -27,23 +37,23 @@ async fn main() -> Result<()> {
   };
   let mailer = mailer.as_ref();
 
-  SubredditWatcher::new(&settings.subreddit)
+  RedditWatcher::new()?
+    .with_subredit_filter(settings.subreddit.clone())
+    .with_title_filter(filter_regex)
     .stream_submissions()
-    // filter based on submission title
-    .filter_map(|(submission, created_utc)| async move {
-      match filter_regex {
-        Some(filter_regex) => filter_regex
-          .is_match(&submission.title)
-          .then(||(submission, created_utc)),
-        None => Some((submission, created_utc))
-      }
-    })
-    .for_each(|(submission, created_utc)| async move {
-      println!(
-        "[{}] r/{} by {}: {}",
-        created_utc, submission.subreddit, submission.author, submission.title
+    .await
+    .for_each(|submission| async move {
+      log::info!(
+        "[{}] {} {}: \"{}\" by {}",
+        submission.created_utc,
+        submission.id,
+        submission.subreddit_name_prefixed,
+        submission.title,
+        submission.author
       );
-
+    })
+    .await;
+  /*
       if let Some(mailer) = mailer {
         let subject = format!("r/{}: {}", settings.subreddit, submission.title);
         let content = html! {
@@ -72,6 +82,6 @@ async fn main() -> Result<()> {
         };
       }
     })
-    .await;
+    .await;*/
   Ok(())
 }

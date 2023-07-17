@@ -1,8 +1,18 @@
-Monitor new posts in a single subreddit, filter post titles using a regular expression, and notify via email.  
-- Example usage (print in console):   
-`cargo +nightly run -- -s "AskReddit" -r "(?i)what"`
-- Example usage (also notify via email):  
-- `cargo +nightly run -- -s "AskReddit" -r "(?i)what" --notify-email="email@example.com`
+Monitor new Reddit posts, and notify via email.  
+
+#### Example usage:
+- Display all new posts in console:   
+  `cargo +nightly run`  
+  &nbsp;
+- Filter by a specific subreddit:  
+  `cargo +nightly run -- -s "AskReddit"`  
+  &nbsp;
+- Also filter by post title using regular expression:  
+  `cargo +nightly run -- -s "AskReddit" -r "(?i)what"`  
+  &nbsp;
+- Also notify via email:    
+  `cargo +nightly run -- -s "AskReddit" -r "(?i)what" --notify-email="email@example.com`  
+  &nbsp; 
 - `cargo +nightly run -- --help` for more help.
 
-Before enabling email, make sure correct SMTP relay credentials are provided in `./smtp_config.toml`
+Before enabling email notifications, make sure correct SMTP relay credentials are provided in `./smtp_config.toml`

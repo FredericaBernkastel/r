@@ -1,13 +1,13 @@
 use clap::Parser;
 
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = "Example: cargo +nightly run -- -s \"AskReddit\" -r \"what's\"")]
+#[command(author, version, about, long_about)]
 pub struct Settings {
-  /// Subreddit to watch
+  /// Filter submissions by a single subreddit
   #[arg(short = 's', long)]
-  pub subreddit: String,
+  pub subreddit: Option<String>,
 
-  /// Filter submissions by title based on this regex
+  /// Filter submissions by title using regex
   #[arg(short = 'r', long = "filter_regex")]
   pub submission_filter_regex: Option<String>,
 
