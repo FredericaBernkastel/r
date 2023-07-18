@@ -11,7 +11,7 @@ Monitor Reddit posts in real time, and notify via email.
   `cargo +nightly run -- -s "AskReddit" -r "(?i)what"`  
   &nbsp;
 - Also notify via email:    
-  `cargo +nightly run -- -s "AskReddit" -r "(?i)what" --notify-email="email@example.com`  
+  `cargo +nightly run -- -s "AskReddit" -r "(?i)what" --notify-email="email@example.com"`  
   &nbsp; 
 - `cargo +nightly run -- --help` for more help.
 
