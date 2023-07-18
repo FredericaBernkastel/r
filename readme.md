@@ -1,4 +1,4 @@
-Monitor new Reddit posts, and notify via email.  
+Monitor Reddit posts in real time, and notify via email.  
 
 #### Example usage:
 - Display all new posts in console:   
