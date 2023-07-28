@@ -1,9 +1,11 @@
+#![allow(dead_code)]
+
+use std::sync::OnceLock;
 use {
   anyhow::Result,
   futures::{StreamExt},
   reddit_watcher::RedditWatcher,
   clap::Parser,
-  std::time::Duration,
   std::{
     sync::Arc
   }
@@ -13,17 +15,6 @@ mod cli;
 mod reddit_watcher;
 mod email;
 mod util;
-
-// fetch new posts every 10s
-static REDDIT_FETCH_INTERVAL: Duration = Duration::from_secs(10);
-// if watching subreddit, fetch new posts every 1 minute
-static SUBREDDIT_FETCH_INTERVAL: Duration = Duration::from_secs(60);
-// send a email at least once per 10 minutes
-static EMAIL_SEND_INTERVAL: Duration = Duration::from_secs(10 * 60);
-// at most 200 posts per letter
-static EMAIL_MAX_SUBMISSIONS_PER_LETTER: usize = 200;
-// do not send a letter, if less than 1 post is present in queue
-static EMAIL_MIN_SUBMISSIONS_PER_LETTER: usize = 1;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -44,22 +35,24 @@ async fn main() -> Result<()> {
     None => None
   };
 
-  let (mailer, mailer_thr) = match settings.notify_email {
+  let mailer = Arc::new(OnceLock::new());
+
+  let mailer_thr = match settings.notify_email {
     Some(_) => {
-      let mailer = Arc::new(email::Mailer::new()?);
-      let thr = mailer.clone().start_thread(&settings);
-      (Some(mailer), Some(thr))
+      mailer.set(email::Mailer::new(settings.clone())?).ok().unwrap();
+      Some(email::Mailer::start_thread(mailer.clone()))
     },
-    None => (None, None)
+    None => None
   };
 
-  RedditWatcher::new()?
-    .with_subredit_filter(settings.subreddit.clone())
-    .with_title_filter(filter_regex)
+  let reddit_watcher = RedditWatcher::new()?;
+  reddit_watcher.with_subredit_filter(settings.subreddit.clone());
+  reddit_watcher.with_title_filter(filter_regex);
+  reddit_watcher
     .stream_submissions()
     .await
     .for_each({
-      let mailer = mailer.as_deref();
+      let mailer = mailer.get();
       move |submission| async move {
         log::info!(
           "[{}] {} {}: \"{}\" by {}",
@@ -70,9 +63,9 @@ async fn main() -> Result<()> {
           submission.author
         );
 
-        if let Some(mailer) = mailer {
-          mailer.add_submission_to_queue(submission);
-        }
+        mailer.map(|m| {
+          m.add_submission_to_queue(submission);
+        });
       }
     })
     .await;

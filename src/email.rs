@@ -1,3 +1,4 @@
+use std::sync::OnceLock;
 use {
   lettre::{
     transport::smtp::authentication::Credentials,
@@ -27,11 +28,13 @@ struct SMTPSettings {
 pub struct Mailer {
   //smtp_settings: SMTPSettings,
   mailer: SmtpTransport,
-  submission_queue: Arc<RwLock<VecDeque<Submission>>>
+  submission_queue: Arc<RwLock<VecDeque<Submission>>>,
+
+  pub env_settings: Arc<RwLock<Settings>>,
 }
 
 impl Mailer {
-  pub fn new() -> Result<Self> {
+  pub fn new(env_settings: Settings) -> Result<Self> {
     let settings: SMTPSettings = toml::from_str(
       &std::fs::read_to_string("smtp_config.toml").context("Unable to read ./smtp_config.toml")?
     )?;
@@ -42,8 +45,9 @@ impl Mailer {
     Ok(Self {
       mailer,
       submission_queue: Arc::new(RwLock::new(
-        VecDeque::with_capacity(crate::EMAIL_MAX_SUBMISSIONS_PER_LETTER)
-      ))
+        VecDeque::with_capacity(env_settings.email_max_submissions_per_letter.unwrap_or(200))
+      )),
+      env_settings: Arc::new(RwLock::new(env_settings))
     })
   }
 
@@ -78,26 +82,37 @@ impl Mailer {
       .body(content.into_string()).unwrap()
   }
 
-  pub fn start_thread(self: Arc<Self>, settings: &Settings) -> std::thread::JoinHandle<()> {
-    let settings = settings.clone();
+  pub fn start_thread(this: Arc<OnceLock<Self>>) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
       let mut last_sent = chrono::Utc::now();
       loop {
         std::thread::sleep(Duration::from_secs(1));
+        let Some(this) = this.get() else { continue };
+        //log::debug!("email queue size: {}", this.submission_queue.read().unwrap().len());
+
         let now = chrono::Utc::now();
-        let mut submission_queue = self.submission_queue.write().unwrap();
-        let over_quota = submission_queue.len() > crate::EMAIL_MAX_SUBMISSIONS_PER_LETTER;
-        let under_quota = submission_queue.len() < crate::EMAIL_MIN_SUBMISSIONS_PER_LETTER;
-        let over_interval = now - last_sent > chrono::Duration::from_std(crate::EMAIL_SEND_INTERVAL).unwrap();
+
+        let env_settings = this.env_settings.read().unwrap();
+        if env_settings.notify_email.is_none() {
+          continue;
+        }
+
+        let mut submission_queue = this.submission_queue.write().unwrap();
+        let over_quota = submission_queue.len() > env_settings.email_max_submissions_per_letter.unwrap_or(200);
+        let under_quota = submission_queue.len() < env_settings.email_min_submissions_per_letter.unwrap_or(1);
+        let over_interval = now - last_sent > chrono::Duration::from_std(
+          Duration::from_secs_f64(env_settings.email_send_interval.unwrap_or(10.0) * 60.0)
+        ).unwrap();
         if (over_quota || over_interval) && !under_quota {
-          let to_send_count = 0..crate::EMAIL_MAX_SUBMISSIONS_PER_LETTER.min(submission_queue.len());
+          let to_send_count = 0..env_settings.email_max_submissions_per_letter.unwrap_or(200).min(submission_queue.len());
           let to_send = submission_queue.drain(to_send_count.clone()).collect::<Vec<_>>();
           last_sent = now;
           // drop the lock as soon as possible
           drop(submission_queue);
-          let message = Self::compose_message(to_send.into_iter(), &settings);
+          drop(env_settings);
+          let message = Self::compose_message(to_send.into_iter(), &this.env_settings.read().unwrap());
           // Send the email
-          match self.mailer.send(&message) {
+          match this.mailer.send(&message) {
             Ok(_) => log::debug!("[{now}] {} items sent in email", to_send_count.len()),
             Err(e) => log::error!("[{now}] Could not send email: {e:?}"),
           };

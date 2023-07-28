@@ -25,11 +25,26 @@ pub struct Submission {
   pub permalink: String
 }
 
-#[derive(Default)]
 pub struct RedditWatcher {
-  subreddit_filter: Option<String>,
-  title_regex_filter: Option<Regex>,
-  http_client: reqwest::Client
+  pub subreddit_filter: RwLock<Option<String>>,
+  pub title_regex_filter: RwLock<Option<Regex>>,
+
+  reddit_fetch_interval: RwLock<Duration>,
+  subreddit_fetch_interval: RwLock<Duration>,
+
+  http_client: reqwest::Client,
+}
+
+impl Default for RedditWatcher {
+  fn default() -> Self {
+    Self {
+      subreddit_filter: Default::default(),
+      title_regex_filter: Default::default(),
+      reddit_fetch_interval: RwLock::new(Duration::from_secs_f64(10.0)),
+      subreddit_fetch_interval: RwLock::new(Duration::from_secs_f64(60.0)),
+      http_client: Default::default(),
+    }
+  }
 }
 
 impl RedditWatcher {
@@ -45,38 +60,50 @@ impl RedditWatcher {
     })
   }
 
-  pub fn with_subredit_filter(mut self, subreddit: Option<String>) -> Self {
-    self.subreddit_filter = subreddit;
-    self
+  pub fn with_subredit_filter(&self, subreddit: Option<String>) {
+    *self.subreddit_filter.write().unwrap() = subreddit;
   }
 
-  pub fn with_title_filter(mut self, regex: Option<Regex>) -> Self {
-    self.title_regex_filter = regex;
-    self
+  pub fn with_title_filter(&self, regex: Option<Regex>) {
+    *self.title_regex_filter.write().unwrap() = regex;
+  }
+
+  pub fn with_reddit_fetch_interval(&self, t: Duration) {
+    *self.reddit_fetch_interval.write().unwrap() = t;
+  }
+
+  pub fn with_subreddit_fetch_interval(&self, t: Duration) {
+    *self.subreddit_fetch_interval.write().unwrap() = t;
   }
 
   pub async fn stream_submissions(&self) -> impl Stream<Item = Submission> + '_ {
-    let last_id = self.get_new(None, self.subreddit_filter.as_deref(), 2)
-      .await.ok()
-      .and_then(|x| x.get(0).cloned())
-      .and_then(|mut x| serde_json::from_value::<Submission>(x["data"].take()).ok())
-      .map(|x| x.id);
-    let last_id = Arc::new(RwLock::new(last_id));
+    let last_id = Arc::new(RwLock::new(self.get_last_id().await));
 
     stream::repeat(())
       .then(move |_| {
         let last_id = last_id.clone();
         async move {
           tokio::time::sleep(
-            if self.subreddit_filter.is_some() {
-              crate::SUBREDDIT_FETCH_INTERVAL
+            if self.subreddit_filter.read().unwrap().is_some() {
+              *self.subreddit_fetch_interval.read().unwrap()
             } else {
-              crate::REDDIT_FETCH_INTERVAL
+              *self.reddit_fetch_interval.read().unwrap()
             }
           ).await;
+
+          {
+            let mut last_id = last_id.write().unwrap();
+            let subreddit = self.subreddit_filter.read().unwrap();
+            if last_id.0.is_some() && subreddit.is_none() {
+              last_id.0 = None // subreddit filter was disabled
+            } else if *subreddit != last_id.0 {
+              *last_id = self.get_last_id().await; // subreddit filter was enabled or changed
+            }
+          }
+
           let submissions = self.get_new(
-            last_id.read().unwrap().as_deref(),
-            self.subreddit_filter.as_deref(),
+            last_id.read().unwrap().1.as_deref(),
+            self.subreddit_filter.read().unwrap().as_deref(),
             100
           )
             .await
@@ -96,12 +123,12 @@ impl RedditWatcher {
           }
           submissions.get(0)
             .map(|s| {
-              *last_id.write().unwrap() = Some(s.id.clone())
+              *last_id.write().unwrap() = (self.subreddit_filter.read().unwrap().clone(), Some(s.id.clone()))
             });
 
           let submissions = submissions.into_iter().rev()
             // filter by title
-            .filter(|s| match &self.title_regex_filter {
+            .filter(|s| match self.title_regex_filter.read().unwrap().as_ref() {
               Some(regex) => regex.is_match(&s.title),
               None => true
             });
@@ -139,4 +166,15 @@ impl RedditWatcher {
         .unwrap_or(vec![])
     )
   }
+
+  async fn get_last_id(&self) -> (Option<String>, Option<String>) {
+    let last_id = self.get_new(None, self.subreddit_filter.read().unwrap().as_deref(), 2)
+      .await.ok()
+      .and_then(|x| x.get(0).cloned())
+      .and_then(|mut x| serde_json::from_value::<Submission>(x["data"].take()).ok())
+      .map(|x| x.id);
+
+    (self.subreddit_filter.read().unwrap().clone(), last_id)
+  }
+
 }
