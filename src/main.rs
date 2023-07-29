@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
     None => None
   };
 
-  let reddit_watcher = RedditWatcher::new()?;
+  let reddit_watcher = RedditWatcher::new(settings.clone())?;
   reddit_watcher.with_subredit_filter(settings.subreddit.clone());
   reddit_watcher.with_title_filter(filter_regex);
   reddit_watcher

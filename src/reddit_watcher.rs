@@ -9,7 +9,7 @@ use {
   serde::Deserialize,
   regex::Regex,
   std::sync::{Arc, RwLock},
-  crate::util
+  crate::{util, cli::Settings}
 };
 
 #[non_exhaustive]
@@ -35,28 +35,24 @@ pub struct RedditWatcher {
   http_client: reqwest::Client,
 }
 
-impl Default for RedditWatcher {
-  fn default() -> Self {
-    Self {
-      subreddit_filter: Default::default(),
-      title_regex_filter: Default::default(),
-      reddit_fetch_interval: RwLock::new(Duration::from_secs_f64(10.0)),
-      subreddit_fetch_interval: RwLock::new(Duration::from_secs_f64(60.0)),
-      http_client: Default::default(),
-    }
-  }
-}
-
 impl RedditWatcher {
-  pub fn new() -> Result<Self> {
+  pub fn new(env_settings: Settings) -> Result<Self> {
     let timeout = Duration::from_secs(10);
+    let title_regex_filter = match env_settings.submission_filter_regex {
+      Some(regex) => Some(Regex::new(&regex)?),
+      None => None
+    };
+
     Ok(Self {
       http_client: reqwest::Client::builder()
         .user_agent("windows:reqwest:v0.11")
         .timeout(timeout)
         .connect_timeout(timeout)
         .build()?,
-      ..Default::default()
+      subreddit_filter: RwLock::new(env_settings.subreddit),
+      title_regex_filter: RwLock::new(title_regex_filter),
+      reddit_fetch_interval: RwLock::new(Duration::from_secs_f64(env_settings.reddit_fetch_interval.unwrap_or(10.0))),
+      subreddit_fetch_interval: RwLock::new(Duration::from_secs_f64(env_settings.subreddit_fetch_interval.unwrap_or(60.0))),
     })
   }
 
